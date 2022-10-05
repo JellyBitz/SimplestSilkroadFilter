@@ -55,12 +55,12 @@ namespace Silkroad.Network
                 e.CancelTransfer = true;
             });
 
-            AddClientPacketHandler(Opcode.GLOBAL_HANDSHAKE, ignoreIt);
-            AddClientPacketHandler(Opcode.GLOBAL_HANDSHAKE_OK, ignoreIt);
-            AddClientPacketHandler(Opcode.GLOBAL_IDENTIFICATION, ignoreIt); // Handled by API
+            RegisterClientPacketHandler(Opcode.GLOBAL_HANDSHAKE, ignoreIt);
+            RegisterClientPacketHandler(Opcode.GLOBAL_HANDSHAKE_OK, ignoreIt);
+            RegisterClientPacketHandler(Opcode.GLOBAL_IDENTIFICATION, ignoreIt); // Handled by API
 
-            AddServerPacketHandler(Opcode.GLOBAL_HANDSHAKE, ignoreIt);
-            AddServerPacketHandler(Opcode.GLOBAL_HANDSHAKE_OK, ignoreIt);
+            RegisterServerPacketHandler(Opcode.GLOBAL_HANDSHAKE, ignoreIt);
+            RegisterServerPacketHandler(Opcode.GLOBAL_HANDSHAKE_OK, ignoreIt);
         }
         #endregion
 
@@ -255,7 +255,7 @@ namespace Silkroad.Network
         /// <summary>
         /// Add handler by opcode using the object context
         /// </summary>
-        private void AddHandler(ref Dictionary<ushort, List<PacketTransferEventHandler>> Context, ushort Opcode, PacketTransferEventHandler Handler)
+        private void RegisterHandler(ref Dictionary<ushort, List<PacketTransferEventHandler>> Context, ushort Opcode, PacketTransferEventHandler Handler)
         {
             // Check if the opcode has some subscriber
             if (!Context.TryGetValue(Opcode, out List<PacketTransferEventHandler> handlers))
@@ -270,21 +270,21 @@ namespace Silkroad.Network
         /// <summary>
         /// Add client (remote) handler by opcode
         /// </summary>
-        public void AddClientPacketHandler(ushort Opcode, PacketTransferEventHandler Handler)
+        public void RegisterClientPacketHandler(ushort Opcode, PacketTransferEventHandler Handler)
         {
-            AddHandler(ref m_ClientPacketEventHandlers, Opcode, Handler);
+            RegisterHandler(ref m_ClientPacketEventHandlers, Opcode, Handler);
         }
         /// <summary>
         /// Add server (local) handler by opcode
         /// </summary>
-        public void AddServerPacketHandler(ushort Opcode, PacketTransferEventHandler Handler)
+        public void RegisterServerPacketHandler(ushort Opcode, PacketTransferEventHandler Handler)
         {
-            AddHandler(ref m_ServerPacketEventHandlers, Opcode, Handler);
+            RegisterHandler(ref m_ServerPacketEventHandlers, Opcode, Handler);
         }
         /// <summary>
         /// Remove packet handler from opcode using context object. If is not specified all handlers from opcode will be removed
         /// </summary>
-        private void RemoveHandler(ref Dictionary<ushort, List<PacketTransferEventHandler>> Context, ushort Opcode, PacketTransferEventHandler Handler = null)
+        private void UnregisterHandler(ref Dictionary<ushort, List<PacketTransferEventHandler>> Context, ushort Opcode, PacketTransferEventHandler Handler = null)
         {
             // Remove all
             if (Handler == null)
@@ -314,17 +314,17 @@ namespace Silkroad.Network
         /// Remove client (remote) packet handler from opcode.
         /// If is not specified all handlers from opcode will be removed
         /// </summary>
-        public void RemoveClientPacketHandler(ushort Opcode, PacketTransferEventHandler Handler = null)
+        public void UnregisterClientPacketHandler(ushort Opcode, PacketTransferEventHandler Handler = null)
         {
-            RemoveHandler(ref m_ClientPacketEventHandlers, Opcode, Handler);
+            UnregisterHandler(ref m_ClientPacketEventHandlers, Opcode, Handler);
         }
         /// <summary>
         /// Remove server (local) packet handler from opcode.
         /// If is not specified all handlers from opcode will be removed
         /// </summary>
-        public void RemoveServerPacketHandler(ushort Opcode, PacketTransferEventHandler Handler = null)
+        public void UnregisterServerPacketHandler(ushort Opcode, PacketTransferEventHandler Handler = null)
         {
-            RemoveHandler(ref m_ServerPacketEventHandlers, Opcode, Handler);
+            UnregisterHandler(ref m_ServerPacketEventHandlers, Opcode, Handler);
         }
         #endregion
 

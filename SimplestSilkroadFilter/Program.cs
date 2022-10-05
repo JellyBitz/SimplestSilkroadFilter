@@ -49,7 +49,7 @@ namespace SimplestSilkroadFilter
                 Console.WriteLine("Gateway Server: Connection finished (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
             };
             // Server Login Response
-            gwServer.AddServerPacketHandler(0xA102, (_s, _e) =>
+            gwServer.RegisterServerPacketHandler(0xA102, (_s, _e) =>
             {
                 var packet = _e.Packet;
                 // Check success
@@ -152,11 +152,11 @@ namespace SimplestSilkroadFilter
                     p.WriteByteArray(_e.Packet.GetBytes());
                     _e.Proxy.Client.Send(p);
                 });
-                agServer.AddServerPacketHandler(0x3015, handlerCopyPacket); // Spawn entity
-                agServer.AddServerPacketHandler(0x3016, handlerCopyPacket); // Despawn entity
-                agServer.AddServerPacketHandler(0x3017, handlerCopyPacket); // Group Spawn begin
-                agServer.AddServerPacketHandler(0x3018, handlerCopyPacket); // Group Spawn end
-                agServer.AddServerPacketHandler(0x3019, handlerCopyPacket); // Group Spawn data
+                agServer.RegisterServerPacketHandler(0x3015, handlerCopyPacket); // Spawn entity
+                agServer.RegisterServerPacketHandler(0x3016, handlerCopyPacket); // Despawn entity
+                agServer.RegisterServerPacketHandler(0x3017, handlerCopyPacket); // Group Spawn begin
+                agServer.RegisterServerPacketHandler(0x3018, handlerCopyPacket); // Group Spawn end
+                agServer.RegisterServerPacketHandler(0x3019, handlerCopyPacket); // Group Spawn data
 
                 // Attach client opcode to build packet
                 var handlerBuildPacket = new AsyncServer.PacketTransferEventHandler((_s, _e) => {
@@ -167,7 +167,7 @@ namespace SimplestSilkroadFilter
                     // Avoid proxy this packet
                     _e.CancelTransfer = true;
                 });
-                agServer.AddClientPacketHandler(0xF00D, handlerBuildPacket); // Custom output
+                agServer.RegisterClientPacketHandler(0xF00D, handlerBuildPacket); // Custom output
 
                 // Start agent server
                 Console.WriteLine("Initializing Agent Server on port " + m_AgentServerPort + "...");
