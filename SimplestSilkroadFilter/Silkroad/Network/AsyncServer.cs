@@ -112,9 +112,10 @@ namespace Silkroad.Network
         /// </summary>
         public void Stop()
         {
-            // TO DO:
-            // drop all connections
-            throw new NotImplementedException();
+            // Shutdown all connections
+            foreach (var connection in Connections)
+                connection.Client.Close();
+            m_Server?.Close();
         }
 
         #endregion
