@@ -4,18 +4,24 @@ using Silkroad.SecurityAPI;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 
 namespace SimplestSilkroadFilter
 {
     class Program
     {
         #region Private Members
-        static IPAddress m_GatewayServerAddress;
-        static ushort m_GatewayServerPort = 15779;
-        static ushort m_AgentServerPort = 16779;
+        private static ushort mBindPort;
+        private static string mPublicHost;
 
-        static Dictionary<string, List<object[]>> m_AgentServerQueue = new Dictionary<string, List<object[]>>();
+        private static string mGatewayAddress;
+        private static ushort mGatewayPort;
+
+
+        private static Dictionary<string, List<object[]>> mAgentServerQueue = new Dictionary<string, List<object[]>>();
+        private static TimeSpan mAgentServerQueueTimeLimit = new TimeSpan(0,0,10);
         #endregion
 
         #region Entry Point
@@ -29,18 +35,23 @@ namespace SimplestSilkroadFilter
             LoadCommandLine(args);
 
             // Make sure the ip is working
-            if (m_GatewayServerAddress == null)
+            if (mGatewayAddress == null)
             {
-                Console.WriteLine("Error! Silkroad server ip/host not found or cannot be resolved." + Environment.NewLine);
-                ShowConsoleUsage();
-                Console.WriteLine("* Press any key to exit . . .");
-                Console.ReadKey();
+                Console.WriteLine("Error! Host not found or cannot be resolved." + Environment.NewLine);
+                DisplayUsage();
+                DisplayPause();
                 return;
             }
+            var localIPAddress = GetMyLocalAddress().ToString();
+            var bindPortForAgent = GetAvailablePort();
+            if (mPublicHost == null)
+                mPublicHost = GetAllMyAddresses().Last();
+            
 
+            #region Gateway Server Setup
             // Initialize gateway proxy
             AsyncServer gwServer = new AsyncServer();
-            gwServer.SetProxy(m_GatewayServerAddress.ToString(), m_GatewayServerPort);
+            gwServer.SetProxy(mGatewayAddress, mGatewayPort);
             // Log gateway connections
             gwServer.OnProxyConnected += (_s, _e) => {
                 Console.WriteLine("Gateway Server: Connection established (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
@@ -48,7 +59,7 @@ namespace SimplestSilkroadFilter
             gwServer.OnProxyDisconnected += (_s, _e) => {
                 Console.WriteLine("Gateway Server: Connection finished (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
             };
-            // Server Login Response
+            // Login Response
             gwServer.RegisterServerPacketHandler(0xA102, (_s, _e) =>
             {
                 var packet = _e.Packet;
@@ -60,11 +71,15 @@ namespace SimplestSilkroadFilter
                     var agentServerPort = packet.ReadUShort();
 
                     var clientIP = ((IPEndPoint)_e.Proxy.Client.Socket.RemoteEndPoint).Address.ToString();
-                    // Create and add this connection to the agent server queue control
-                    if (!m_AgentServerQueue.TryGetValue(clientIP, out List<object[]> connections))
+                    // Check if client connection is from an external address to redirect them properly
+                    if (clientIP != localIPAddress)
+                        agentServerIP = mPublicHost;
+
+                    // Add this connection to the agent server queue control
+                    if (!mAgentServerQueue.TryGetValue(clientIP, out List<object[]> connections))
                     {
                         connections = new List<object[]>();
-                        m_AgentServerQueue[clientIP] = connections;
+                        mAgentServerQueue[clientIP] = connections;
                     }
                     connections.Add(new object[]
                     {
@@ -78,107 +93,100 @@ namespace SimplestSilkroadFilter
                     var p = new Packet(0xA102);
                     p.WriteByte(1); // success
                     p.WriteUInt(queueId);
-                    p.WriteAscii("127.0.0.1");
-                    p.WriteUShort(m_AgentServerPort);
+                    p.WriteAscii(agentServerIP);
+                    p.WriteUShort(bindPortForAgent);
                     _e.Proxy.Client.Send(p);
-                    // Avoid send this packet to client
+
+                    // Avoid send this packet already handled to client
                     _e.CancelTransfer = true;
                 }
             });
 
-            // Start gateway server
-            Console.WriteLine("Initializing Gateway Server on port " + m_GatewayServerPort + "...");
-            if (gwServer.Start(m_GatewayServerPort))
+            // Run Gateway Server
+            Console.WriteLine("Initializing Gateway Proxy Server on port " + mBindPort + "...");
+            try
             {
-                Console.WriteLine("Gateway Server started successfully!");
+                gwServer.Start(mBindPort);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex);
+                DisplayPause();
+                return;
+            }
+            Console.WriteLine("Gateway Server started successfully!");
+            #endregion
 
-                // Initialize agent proxy
-                AsyncServer agServer = new AsyncServer();
+            #region Agent Server Setup
+            // Initialize agent proxy
+            AsyncServer agServer = new AsyncServer();
 
-                // Control dynamic proxy connections
-                agServer.OnProxyConnection += (_s, _e) =>
+            // Agent server queue control - WHY? To avoid IP change (kinda of exploit) at login
+            agServer.OnProxyConnection += (_s, _e) =>
+            {
+                var clientIP = ((IPEndPoint)_e.Proxy.Client.Socket.RemoteEndPoint).Address.ToString();
+                // Check connections controller
+                if (mAgentServerQueue.TryGetValue(clientIP, out List<object[]> connections))
                 {
-                    var clientIP = ((IPEndPoint)_e.Proxy.Client.Socket.RemoteEndPoint).Address.ToString();
-
-                    // Check connections controller
-                    if (m_AgentServerQueue.TryGetValue(clientIP, out List<object[]> connections))
+                    // Check all connections from this IP and remove the old ones
+                    object[] clientQueue = null;
+                    for (int i = 0; i < connections.Count; i++)
                     {
-                        // Check all connections from this IP and remove the old ones
-                        object[] clientQueue = null;
-                        for (int i = 0; i < connections.Count; i++)
+                        Stopwatch connectionTime = (Stopwatch)connections[i][2];
+                        // Remove connections longer than one minute
+                        if (connectionTime.Elapsed > mAgentServerQueueTimeLimit)
                         {
-                            Stopwatch connectionTime = (Stopwatch)connections[i][2];
-                            // Remove connections longer than one minute
-                            if (connectionTime.Elapsed.Minutes > 1)
-                            {
-                                connections.RemoveAt(i--);
-                                continue;
-                            }
-                            else
-                            {
-                                clientQueue = connections[i];
-                                connections.RemoveAt(i);
-                                break;
-                            }
-                        }
-
-                        // Set proxy connection
-                        if (clientQueue == null)
-                        {
-                            // Shutdown connection if cannot be found
-                            _e.Proxy.Server.Close();
+                            connections.RemoveAt(i--);
+                            continue;
                         }
                         else
                         {
-                            // Redirect connection
-                            _e.IP = (string)clientQueue[0];
-                            _e.Port = (ushort)clientQueue[1];
+                            clientQueue = connections[i];
+                            connections.RemoveAt(i);
+                            break;
                         }
                     }
-                };
 
-                // Log agent connections
-                agServer.OnProxyConnected += (_s, _e) => {
-                    Console.WriteLine("Agent Server: Connection established (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
-                };
-                agServer.OnProxyDisconnected += (_s, _e) => {
-                    Console.WriteLine("Agent Server: Connection finished (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
-                };
-                // Attach server opcodes to copy packet
-                var handlerCopyPacket = new AsyncServer.PacketTransferEventHandler((_s, _e) => {
-                    // Copy packet and send it as a new opcode
-                    var p = new Packet(0xF00D, _e.Packet.Encrypted, _e.Packet.Massive);
-                    p.WriteUShort(_e.Packet.Opcode);
-                    p.WriteByteArray(_e.Packet.GetBytes());
-                    _e.Proxy.Client.Send(p);
-                });
-                agServer.RegisterServerPacketHandler(0x3015, handlerCopyPacket); // Spawn entity
-                agServer.RegisterServerPacketHandler(0x3016, handlerCopyPacket); // Despawn entity
-                agServer.RegisterServerPacketHandler(0x3017, handlerCopyPacket); // Group Spawn begin
-                agServer.RegisterServerPacketHandler(0x3018, handlerCopyPacket); // Group Spawn end
-                agServer.RegisterServerPacketHandler(0x3019, handlerCopyPacket); // Group Spawn data
-
-                // Attach client opcode to build packet
-                var handlerBuildPacket = new AsyncServer.PacketTransferEventHandler((_s, _e) => {
-                    // Build packet and send it
-                    var opcode = _e.Packet.ReadUShort();
-                    var data = _e.Packet.ReadByteArray(_e.Packet.RemainingRead());
-                    _e.Proxy.Server.Send(new Packet(opcode, _e.Packet.Encrypted, _e.Packet.Massive, data));
-                    // Avoid proxy this packet
-                    _e.CancelTransfer = true;
-                });
-                agServer.RegisterClientPacketHandler(0xF00D, handlerBuildPacket); // Custom output
-
-                // Start agent server
-                Console.WriteLine("Initializing Agent Server on port " + m_AgentServerPort + "...");
-                if (agServer.Start(m_AgentServerPort))
-                {
-                    Console.WriteLine("Agent Server started successfully!");
+                    // Set proxy connection
+                    if (clientQueue == null)
+                    {
+                        // Shutdown connection if cannot be found
+                        _e.Proxy.Server.Close();
+                    }
+                    else
+                    {
+                        // Redirect connection
+                        _e.IP = (string)clientQueue[0];
+                        _e.Port = (ushort)clientQueue[1];
+                    }
                 }
+            };
+
+            // Log agent connections
+            agServer.OnProxyConnected += (_s, _e) => {
+                Console.WriteLine("Agent Server: Connection established (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
+            };
+            agServer.OnProxyDisconnected += (_s, _e) => {
+                Console.WriteLine("Agent Server: Connection finished (" + _e.Proxy.Server.Socket.LocalEndPoint + ")");
+            };
+
+            // Start agent server
+            Console.WriteLine("Initializing Agent Server on port " + bindPortForAgent + "...");
+            try
+            {
+                agServer.Start(bindPortForAgent);
             }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex);
+                DisplayPause();
+                return;
+            }
+            Console.WriteLine("Agent Server started successfully!");
+            #endregion
 
             // Reading ENTER to exit
-            Console.WriteLine("* Press ESCAPE anytime to exit . . .");
+            Console.WriteLine("Press ESCAPE anytime to exit . . .");
             while (Console.ReadKey(false).Key != ConsoleKey.Escape) ;
         }
         #endregion
@@ -195,51 +203,126 @@ namespace SimplestSilkroadFilter
                 string cmd = args[i].ToLower();
 
                 // Check commands with data
-                if (cmd.StartsWith("-ip="))
+                if (cmd.StartsWith("-bind-port="))
                 {
-                    var address = GetIPAddress(args[i].Substring(4));
-                    if (address != null)
-                        m_GatewayServerAddress = address;
+                    if(ushort.TryParse(cmd.Substring("-bind-port=".Length), out var value))
+                        mBindPort = value;
                 }
-                else if (cmd.StartsWith("-port="))
+                else if (cmd.StartsWith("-gw-host="))
                 {
-                    if (ushort.TryParse(args[i].Substring(6), out ushort port))
-                        m_GatewayServerPort = port;
+                    var value = cmd.Substring("-gw-host=".Length);
+                    if (!string.IsNullOrEmpty(value) && GetIPAddress(value) != null)
+                        mGatewayAddress = value;
                 }
-                else if (cmd.StartsWith("-ag-port="))
+                else if (cmd.StartsWith("-gw-port="))
                 {
-                    if (ushort.TryParse(args[i].Substring(9), out ushort port))
-                        m_AgentServerPort = port;
+                    if (ushort.TryParse(cmd.Substring("-gw-port=".Length), out var value))
+                        mGatewayPort = value;
+                }
+                else if (cmd.StartsWith("-public-host="))
+                {
+                    var value = cmd.Substring("-public-host=".Length);
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        var address = GetIPAddress(value);
+                        if (address != null)
+                            mPublicHost = address.ToString();
+                    }
                 }
             }
         }
         /// <summary>
-        /// Shows application usage at console
+        /// Displays info about command line usage
         /// </summary>
-        static void ShowConsoleUsage()
+        private static void DisplayUsage()
         {
             Console.WriteLine("Usage: ");
-            Console.WriteLine("-ip : IP or HOST from the Silkroad to connect.");
-            Console.WriteLine("-port : Gateway port from your Silkroad to connect.");
-            Console.WriteLine("-ag-port : Optional port used as agent filter server.");
+            Console.WriteLine("-bind-port : Port this proxy gonna use to behave as Gateway");
+            Console.WriteLine("-gw-host : Host or IP from the Silkroad server to connect");
+            Console.WriteLine("-gw-port : Port from the Silkroad server to connect");
+            Console.WriteLine("-public-host : (Optional) Host you'll use to redirect connections outside your local machine");
             Console.WriteLine();
-            Console.WriteLine("Example as local server:");
-            Console.WriteLine("> SimplestSilkroadFilter.exe -ip=127.0.0.1 -port=15779");
+            Console.WriteLine("Example:");
+            Console.WriteLine("> SimplestSilkroadFilter.exe -bind-port=15777 -gw-host=192.168.1.121 -gw-port=15779");
             Console.WriteLine();
         }
         /// <summary>
-        /// Get IP address
+        /// Mimic classic System("pause") from C++.
         /// </summary>
-        static IPAddress GetIPAddress(string HostNameOrAddress)
+        private static void DisplayPause()
+        {
+            Console.WriteLine("Press any key to continue...");
+            Console.ReadKey();
+        }
+        /// <summary>
+        /// Find the IP used by this machine on the network
+        /// </summary>
+        public static IPAddress GetMyLocalAddress()
+        {
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            foreach (var ip in host.AddressList)
+                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                    return ip;
+            return null;
+        }
+        /// <summary>
+        /// Try to solve and returns the host. Returns null if cannot be resolved
+        /// </summary>
+        public static IPAddress GetIPAddress(string HostOrAddress)
         {
             try
             {
-                IPHostEntry hostEntry = Dns.GetHostEntry(HostNameOrAddress);
+                IPHostEntry hostEntry = Dns.GetHostEntry(HostOrAddress);
                 if (hostEntry.AddressList.Length > 0)
                     return hostEntry.AddressList[0];
             }
             catch { }
             return null;
+        }
+        /// <summary>
+        /// Find an available port to bind
+        /// </summary>
+        public static int GetAvailablePort(AddressFamily addressFamily = AddressFamily.InterNetwork, SocketType socketType = SocketType.Stream, ProtocolType protocolType = ProtocolType.Tcp)
+        {
+            using (var socket = new Socket(addressFamily, socketType, protocolType))
+            {
+                socket.Bind(new IPEndPoint(IPAddress.Any, 0));
+                return ((IPEndPoint)socket.LocalEndPoint).Port;
+            }
+        }
+        /// <summary>
+		/// Get all the addresses this machine is using
+		/// </summary>
+		public static List<string> GetAllMyAddresses()
+        {
+            var ips = new List<string>
+            {
+                // Local
+                "127.0.0.1"
+            };
+
+            // Private
+            if (System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
+            {
+                var hosts = Dns.GetHostEntry(Dns.GetHostName());
+                foreach (var ip in hosts.AddressList)
+                {
+                    if (ip.AddressFamily == AddressFamily.InterNetwork)
+                    {
+                        ips.Add(ip.ToString());
+                        break;
+                    }
+                }
+
+                // Public
+                try
+                {
+                    ips.Add(new WebClient().DownloadString("http://ipinfo.io/ip"));
+                } catch { }
+            }
+
+            // Return result
+            return ips;
         }
         #endregion
     }

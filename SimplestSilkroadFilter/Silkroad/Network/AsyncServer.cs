@@ -79,33 +79,25 @@ namespace Silkroad.Network
         /// <summary>
         /// Start listening all client connections to redirect all traffic asynchronized
         /// </summary>
-        public bool Start(int Port)
+        public void Start(int Port)
         {
             // Create the TCP/IP socket (IPV4)
             m_Server = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
             // Bind the socket to the local endpoint and listen for incoming connections
-            try
-            {
-                // Establish the endpoint for the server to listen
-                IPEndPoint localEndPoint = new IPEndPoint(IPAddress.Any, Port);
 
-                // Bind the IP
-                m_Server.Bind(localEndPoint);
-                // Listening queue
-                m_Server.Listen(50);
+            // Establish the endpoint for the server to listen
+            IPEndPoint localEndPoint = new IPEndPoint(IPAddress.Any, Port);
 
-                int asyncConnectionQueueMax = 5;
-                // Start an asynchronous socket to listen for connections
-                for (int i = 0; i < asyncConnectionQueueMax; i++)
-                    BeginAcceptCallback();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine(ex);
-                return false;
-            }
-            return true;
+            // Bind the IP
+            m_Server.Bind(localEndPoint);
+            // Listening queue
+            m_Server.Listen(50);
+
+            int asyncConnectionQueueMax = 5;
+            // Start an asynchronous socket to listen for connections
+            for (int i = 0; i < asyncConnectionQueueMax; i++)
+                BeginAcceptCallback();
         }
         /// <summary>
         /// Stop the server dropping all the connections.
