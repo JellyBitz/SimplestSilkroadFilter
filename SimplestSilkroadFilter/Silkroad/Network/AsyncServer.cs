@@ -41,6 +41,7 @@ namespace Silkroad.Network
                 GLOBAL_HANDSHAKE_OK = 0x9000,
                 GLOBAL_IDENTIFICATION = 0x2001;
         }
+        public int Port { get; private set; }
         /// <summary>
         /// All connections currently handled by server
         /// </summary>
@@ -98,6 +99,9 @@ namespace Silkroad.Network
             // Start an asynchronous socket to listen for connections
             for (int i = 0; i < asyncConnectionQueueMax; i++)
                 BeginAcceptCallback();
+
+            // Track port being use
+            this.Port = ((IPEndPoint)m_Server.LocalEndPoint).Port;
         }
         /// <summary>
         /// Stop the server dropping all the connections.
