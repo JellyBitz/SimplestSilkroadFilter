@@ -9,8 +9,8 @@ The default proxy application setup has been made to support connections outside
 - `-gw-host=` : `*` Host or IP from the SRO server to connect
 - `-gw-port=` : `*` Port from the Silkroad server to connect
 - `-bind-gw-port=` : Port this proxy gonna use to behave as Gateway server (Recommended)
-- `-bind-gw-port=` : Port this proxy gonna use to behave as Agent server
-- `-bind-gw-port=` : Port this proxy gonna use to behave as Download server
+- `-bind-ag-port=` : Port this proxy gonna use to behave as Agent server
+- `-bind-dl-port=` : Port this proxy gonna use to behave as Download server
 - `-public-host=` : Public Host or IP you will use for external connections to your private network
 
 ## Example

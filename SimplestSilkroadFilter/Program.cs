@@ -352,6 +352,11 @@ namespace SimplestSilkroadFilter
                     if (ushort.TryParse(cmd.Substring("-bind-ag-port=".Length), out var value))
                         mBindAgentPort = value;
                 }
+                else if (cmd.StartsWith("-bind-dl-port="))
+                {
+                    if (ushort.TryParse(cmd.Substring("-bind-dl-port=".Length), out var value))
+                        mBindDownloadPort = value;
+                }
                 else if (cmd.StartsWith("-gw-host="))
                 {
                     var value = cmd.Substring("-gw-host=".Length);
